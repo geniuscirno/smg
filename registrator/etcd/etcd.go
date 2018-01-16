@@ -5,41 +5,41 @@ import (
 	"encoding/json"
 
 	etcd "github.com/coreos/etcd/clientv3"
-	"github.com/geniuscirno/registrator/backend"
+	"github.com/geniuscirno/smg/registrator"
 )
 
 func init() {
-	backend.Register(&builder{})
+	registrator.Register(&builder{})
 }
 
 type builder struct{}
 
-func (b *builder) Build(target backend.Target) (backend.Client, error) {
+func (b *builder) Build(target registrator.Target) (registrator.Registrator, error) {
 	cli, err := etcd.NewFromURL("http://" + target.Endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return &etcdClient{client: cli}, nil
+	return &etcdRegistrator{client: cli}, nil
 }
 
 func (b *builder) Scheme() string {
 	return "etcd"
 }
 
-type etcdClient struct {
+type etcdRegistrator struct {
 	client *etcd.Client
 }
 
-func (c *etcdClient) Register(s *backend.ServiceDesc) error {
+func (c *etcdRegistrator) Register(s *registrator.Endpoint) error {
 	b, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	_, err = c.client.KV.Put(context.Background(), "02service/"+s.ID, string(b))
+	_, err = c.client.KV.Put(context.Background(), "02service/"+s.Name+"/"+s.Addr, string(b))
 	return err
 }
 
-func (c *etcdClient) Degister(id string) error {
-	_, err := c.client.KV.Delete(context.Background(), id)
+func (c *etcdRegistrator) Degister(s *registrator.Endpoint) error {
+	_, err := c.client.KV.Delete(context.Background(), "02service/"+s.Name+"/"+s.Addr)
 	return err
 }

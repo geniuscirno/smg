@@ -1,7 +1,6 @@
 package smg
 
 import (
-	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -15,27 +14,30 @@ type Server interface {
 }
 
 type applicationOptions struct {
-	registratorUrl string
-	serviceDesc    *registrator.ServiceDesc
+	registratorUrl   string
+	resolverUrl      string
+	registerEndpoint *registrator.Endpoint
 }
 
 type ApplicationOption func(*applicationOptions)
 
-func WithRegistrator(s string) ApplicationOption {
+func WithRegistrator(s string, ep *registrator.Endpoint) ApplicationOption {
 	return func(o *applicationOptions) {
 		o.registratorUrl = s
+		o.registerEndpoint = ep
 	}
 }
 
-func WithServiceDesc(s *registrator.ServiceDesc) ApplicationOption {
+func WithResolver(s string) ApplicationOption {
 	return func(o *applicationOptions) {
-		o.serviceDesc = s
+		o.resolverUrl = s
 	}
 }
 
 type Application struct {
 	opts           applicationOptions
-	appRegistrator *registrator.Registrator
+	appRegistrator *appRegistratorWarpper
+	appResolver    *appResolverWarpper
 }
 
 func NewApplication(opts ...ApplicationOption) (app *Application, err error) {
@@ -46,23 +48,28 @@ func NewApplication(opts ...ApplicationOption) (app *Application, err error) {
 	}
 
 	if app.opts.registratorUrl != "" {
-		app.appRegistrator, err = registrator.NewRegistrator(app.opts.registratorUrl)
+		app.appRegistrator, err = newAppRegistratorWarpper(app)
 		if err != nil {
 			return nil, err
 		}
-		if app.opts.serviceDesc == nil {
-			return nil, errors.New("WithRegistrator: no ServiceDesc")
+	}
+
+	if app.opts.resolverUrl != "" {
+		app.appResolver, err = newAppResolverWarpper(app)
+		if err != nil {
+			return nil, err
 		}
 	}
+
 	return app, nil
 }
 
 func (app *Application) Run(server Server) error {
 	if app.appRegistrator != nil {
-		if err := app.appRegistrator.Register(app.opts.serviceDesc); err != nil {
+		if err := app.appRegistrator.Register(); err != nil {
 			return err
 		}
-		defer app.appRegistrator.Degister(app.opts.serviceDesc.ID)
+		defer app.appRegistrator.Degister()
 	}
 
 	errCh := make(chan error, 1)
