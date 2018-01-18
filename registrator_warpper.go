@@ -15,18 +15,28 @@ type appRegistratorWarpper struct {
 	app         *Application
 }
 
-func parseRegistratorTarget(target string) (registrator.Target, bool) {
-	spl := strings.SplitN(target, "://", 2)
+func split2(s, sep string) (string, string, bool) {
+	spl := strings.SplitN(s, sep, 2)
 	if len(spl) < 2 {
-		return registrator.Target{}, false
+		return "", "", false
 	}
-	return registrator.Target{Scheme: spl[0], Endpoint: spl[1]}, true
+	return spl[0], spl[1], true
+}
+
+func parseRegistratorTarget(target string) (ret registrator.Target, err error) {
+	var ok bool
+	ret.Scheme, ret.Endpoint, ok = split2(target, "://")
+	if !ok {
+		return ret, errors.New("parseRegistratorTarget: invalid target")
+	}
+	ret.Authority, ret.Endpoint, _ = split2(ret.Endpoint, "/")
+	return ret, nil
 }
 
 func newAppRegistratorWarpper(app *Application) (*appRegistratorWarpper, error) {
-	target, ok := parseRegistratorTarget(app.opts.registratorUrl)
-	if !ok {
-		return nil, fmt.Errorf("invalid registrator url: %s", app.opts.registratorUrl)
+	target, err := parseRegistratorTarget(app.opts.registratorUrl)
+	if err != nil {
+		return nil, err
 	}
 
 	rb, ok := registrator.Get(target.Scheme)
@@ -40,7 +50,6 @@ func newAppRegistratorWarpper(app *Application) (*appRegistratorWarpper, error) 
 
 	warpper := &appRegistratorWarpper{app: app}
 
-	var err error
 	warpper.registrator, err = rb.Build(target)
 	if err != nil {
 		return nil, err

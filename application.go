@@ -6,6 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/geniuscirno/smg/configurator"
+
 	"github.com/geniuscirno/smg/registrator"
 )
 
@@ -18,11 +20,10 @@ type ConfiguratorWatcher interface {
 }
 
 type applicationOptions struct {
-	registratorUrl      string
-	registerEndpoint    *registrator.Endpoint
-	configuratorUrl     string
-	configuratorWatcher interface{}
-	config              interface{}
+	registratorUrl   string
+	registerEndpoint *registrator.Endpoint
+	configuratorUrl  string
+	config           configurator.Configer
 }
 
 type ApplicationOption func(*applicationOptions)
@@ -34,10 +35,10 @@ func WithRegistrator(s string, ep *registrator.Endpoint) ApplicationOption {
 	}
 }
 
-func WithConfigurator(s string, v interface{}) ApplicationOption {
+func WithConfigurator(s string, c configurator.Configer) ApplicationOption {
 	return func(o *applicationOptions) {
 		o.configuratorUrl = s
-		o.config = v
+		o.config = c
 	}
 }
 
@@ -57,9 +58,6 @@ func NewApplication(opts ...ApplicationOption) (app *Application, err error) {
 	if app.opts.configuratorUrl != "" {
 		app.appConfigurator, err = newAppConfiguratorWarpper(app)
 		if err != nil {
-			return nil, err
-		}
-		if err = app.appConfigurator.Load(); err != nil {
 			return nil, err
 		}
 	}

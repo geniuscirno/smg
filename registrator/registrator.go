@@ -26,8 +26,9 @@ type Endpoint struct {
 // example:
 //		etcd://localhost:2379
 type Target struct {
-	Scheme   string
-	Endpoint string
+	Scheme    string
+	Authority string
+	Endpoint  string
 }
 
 // Builder creates a client.

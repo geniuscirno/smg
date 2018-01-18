@@ -14,26 +14,22 @@ func Get(scheme string) (Builder, bool) {
 }
 
 type Target struct {
-	Scheme   string
-	Endpoint string
+	Scheme    string
+	Authority string
+	Endpoint  string
 }
 
 type Builder interface {
-	Build(target Target) (Configurator, error)
+	Build(Target, Configer) (Configurator, error)
 	Scheme() string
 }
 
-type KV struct {
-	Key   string
-	Value string
-}
-
-type Config interface {
-	Load([]KV) error
-	Reset()
+type Configer interface {
+	Load([]byte) error
+	OnConfigChange() error
 }
 
 type Configurator interface {
+	Load() error
 	Watch()
-	Load(Config) error
 }

@@ -3,34 +3,29 @@ package smg
 import (
 	"errors"
 	"fmt"
-	"log"
-	"strings"
 
 	"github.com/geniuscirno/smg/configurator"
 )
 
-type CfgWatcher interface {
-	// WatchConfig(key string, value )
-}
-
 type appConfiguratorWarpper struct {
 	configurator configurator.Configurator
 	app          *Application
-	cfg          interface{}
 }
 
-func parseRegistratorTarget(target string) (configurator.Target, bool) {
-	spl := strings.SplitN(target, "://", 2)
-	if len(spl) < 2 {
-		return configurator.Target{}, false
+func parseConfiguratorTarget(target string) (ret configurator.Target, err error) {
+	var ok bool
+	ret.Scheme, ret.Endpoint, ok = split2(target, "://")
+	if !ok {
+		return ret, errors.New("parseConfiguratorTarget: invalid target")
 	}
-	return configurator.Target{Scheme: spl[0], Endpoint: spl[1]}, true
+	ret.Authority, ret.Endpoint, _ = split2(ret.Endpoint, "/")
+	return ret, nil
 }
 
 func newAppConfiguratorWarpper(app *Application) (*appConfiguratorWarpper, error) {
-	target, ok := parseRegistratorTarget(app.opts.configuratorUrl)
-	if !ok {
-		return nil, fmt.Errorf("invalid configurator url: %s", app.opts.configuratorUrl)
+	target, err := parseConfiguratorTarget(app.opts.configuratorUrl)
+	if err != nil {
+		return nil, err
 	}
 
 	cb, ok := configurator.Get(target.Scheme)
@@ -42,27 +37,16 @@ func newAppConfiguratorWarpper(app *Application) (*appConfiguratorWarpper, error
 		return nil, errors.New("WithConfigurator: config is nil")
 	}
 
-	warpper := &appConfiguratorWarpper{app: app, cfg: app.opts.config}
+	warpper := &appConfiguratorWarpper{app: app}
 
-	var err error
-	warpper.configurator, err = cb.Build(target)
+	warpper.configurator, err = cb.Build(target, app.opts.config)
 	if err != nil {
 		return nil, err
 	}
-	return warpper, nil
-}
-
-func (c *appConfiguratorWarpper) Load() error {
-	log.Println("configurator:Load")
-	return c.configurator.Load(c.cfg)
-}
-
-func (c *appConfiguratorWarpper) Watch() {
-	log.Println("configurator:Watch")
-	for {
-		wc, ok := <-c.configurator.Watch()
-		if !ok {
-			log.Println("configurator:Watch watch channel closed!")
-		}
+	if err = warpper.configurator.Load(); err != nil {
+		return nil, err
 	}
+	go warpper.configurator.Watch()
+
+	return warpper, nil
 }

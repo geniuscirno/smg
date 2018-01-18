@@ -2,11 +2,67 @@ package etcd
 
 import (
 	"context"
-	"reflect"
+	"errors"
+	"log"
 
 	etcd "github.com/coreos/etcd/clientv3"
 	"github.com/geniuscirno/smg/configurator"
 )
+
+/*
+cfg := &Config{}
+
+`04service/cfg/account`
+
+type Config struct{
+	Mongo string	`json:"mongo-addr"`
+	Redis string 	`json:"redis-addr"`
+	LogLevel uint32 `json:"log-level"`
+	mutex sync.RWMutex
+}
+
+type (c *Config) Load(b []byte) error{
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	return json.Unmarshal(b, c)
+}
+
+func (c *Config) GetMongo() string{
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	return c.Mongo
+}
+
+func (c *Config) GetRedis() string{
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	return c.Redis
+}
+
+func (c *Config) GetLogLevel() uint32{
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	return c.LogLevel
+}
+
+type Server struct{
+	cfg *Config
+}
+
+func (s *Server) Load() error{
+	return s.cfg.Load()
+}
+
+func (s *Server) OnConfigChange() error{
+	log.SetLevel(s.cfg.LogLevel())
+}
+
+
+*/
 
 type builder struct{}
 
@@ -14,12 +70,13 @@ func init() {
 	configurator.Register(&builder{})
 }
 
-func (*builder) Build(target configurator.Target) (configurator.Configurator, error) {
-	c, err := etcd.NewFromURL("http://" + target.Endpoint)
+func (*builder) Build(target configurator.Target, cfg configurator.Configer) (configurator.Configurator, error) {
+	c, err := etcd.NewFromURL("http://" + target.Authority)
 	if err != nil {
 		return nil, err
 	}
-	return &etcdConfigurator{c: c}, nil
+
+	return &etcdConfigurator{c: c, cfg: cfg, target: target.Endpoint}, nil
 }
 
 func (*builder) Scheme() string {
@@ -27,33 +84,42 @@ func (*builder) Scheme() string {
 }
 
 type etcdConfigurator struct {
-	c *etcd.Client
+	c      *etcd.Client
+	target string
+	cfg    configurator.Configer
 }
 
-func (c *etcdConfigurator) Load(cfg configurator.Config) error {
-	t := reflect.ValueOf(cfg).Type()
-	var kvs []configurator.KV
-	for i := 0; i < t.NumField(); i++ {
-		path := t.Field(i).Tag.Get("cfgd")
-		if path == "" {
-			continue
-		}
-		resp, err := c.c.KV.Get(context.TODO(), path)
-		if err != nil {
-			return err
-		}
-
-		if len(resp.Kvs) == 0 {
-			continue
-		}
-
-		kvs = append(kvs, configurator.KV{Key: string(resp.Kvs[0].Key), Value: string(resp.Kvs[0].Value)})
+func (c *etcdConfigurator) Load() error {
+	resp, err := c.c.KV.Get(context.TODO(), c.target)
+	if err != nil {
+		return err
 	}
-	return cfg.Load(kvs)
+
+	if resp.Count == 0 {
+		return errors.New("configurator:load not found")
+	}
+
+	return c.cfg.Load(resp.Kvs[0].Value)
 }
 
-func (c *etcdConfigurator) Watch(cfg configurator.Config) {
+func (c *etcdConfigurator) Watch() {
+	watcher := c.c.Watch(context.TODO(), c.target)
 	for {
+		wc, ok := <-watcher
+		if !ok {
+			log.Println("configurator:watch channel closed!")
+			return
+		}
 
+		for _, e := range wc.Events {
+			switch e.Type {
+			case etcd.EventTypePut:
+				if err := c.cfg.Load(e.Kv.Value); err != nil {
+					log.Println(err)
+					continue
+				}
+				c.cfg.OnConfigChange()
+			}
+		}
 	}
 }
