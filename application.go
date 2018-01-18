@@ -13,9 +13,16 @@ type Server interface {
 	Serve() error
 }
 
+type ConfiguratorWatcher interface {
+	WatchConfig()
+}
+
 type applicationOptions struct {
-	registratorUrl   string
-	registerEndpoint *registrator.Endpoint
+	registratorUrl      string
+	registerEndpoint    *registrator.Endpoint
+	configuratorUrl     string
+	configuratorWatcher interface{}
+	config              interface{}
 }
 
 type ApplicationOption func(*applicationOptions)
@@ -27,9 +34,17 @@ func WithRegistrator(s string, ep *registrator.Endpoint) ApplicationOption {
 	}
 }
 
+func WithConfigurator(s string, v interface{}) ApplicationOption {
+	return func(o *applicationOptions) {
+		o.configuratorUrl = s
+		o.config = v
+	}
+}
+
 type Application struct {
-	opts           applicationOptions
-	appRegistrator *appRegistratorWarpper
+	opts            applicationOptions
+	appRegistrator  *appRegistratorWarpper
+	appConfigurator *appConfiguratorWarpper
 }
 
 func NewApplication(opts ...ApplicationOption) (app *Application, err error) {
@@ -37,6 +52,16 @@ func NewApplication(opts ...ApplicationOption) (app *Application, err error) {
 
 	for _, opt := range opts {
 		opt(&app.opts)
+	}
+
+	if app.opts.configuratorUrl != "" {
+		app.appConfigurator, err = newAppConfiguratorWarpper(app)
+		if err != nil {
+			return nil, err
+		}
+		if err = app.appConfigurator.Load(); err != nil {
+			return nil, err
+		}
 	}
 
 	if app.opts.registratorUrl != "" {
@@ -55,6 +80,14 @@ func (app *Application) Run(server Server) error {
 			return err
 		}
 		defer app.appRegistrator.Degister()
+	}
+
+	if app.appConfigurator != nil {
+		go func() {
+			if _, ok := server.(CfgWatcher); ok {
+				app.appConfigurator.Watch()
+			}
+		}()
 	}
 
 	errCh := make(chan error, 1)
