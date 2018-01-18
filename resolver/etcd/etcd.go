@@ -3,11 +3,13 @@ package etcd
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"log"
+
+	"github.com/geniuscirno/smg/registrator"
+
+	"google.golang.org/grpc/resolver"
 
 	etcd "github.com/coreos/etcd/clientv3"
-	"github.com/geniuscirno/smg/registrator"
-	"github.com/geniuscirno/smg/resolver"
 )
 
 type builder struct{}
@@ -16,12 +18,16 @@ func init() {
 	resolver.Register(&builder{})
 }
 
-func (*builder) Build(target resolver.Target) (resolver.Resolver, error) {
-	cli, err := etcd.NewFromURL("http://" + target.Endpoint)
+func (*builder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOption) (resolver.Resolver, error) {
+	cli, err := etcd.NewFromURL("http://" + target.Authority)
 	if err != nil {
 		return nil, err
 	}
-	return &etcdResolver{client: cli}, nil
+
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &etcdResolver{c: cli, cc: cc, target: target.Endpoint, ctx: ctx, cancel: cancel}
+	go r.watcher()
+	return r, nil
 }
 
 func (*builder) Scheme() string {
@@ -29,64 +35,74 @@ func (*builder) Scheme() string {
 }
 
 type etcdResolver struct {
-	client *etcd.Client
+	c      *etcd.Client
+	cc     resolver.ClientConn
+	target string
+	ctx    context.Context
+	cancel context.CancelFunc
+	wc     <-chan etcd.WatchResponse
+	addrs  []resolver.Address
 }
 
-func (r *etcdResolver) Resolve(target string) (resolver.Watcher, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	w := &Watcher{c: r.client, target: target, ctx: ctx, cancel: cancel}
-	return w, nil
+func (r *etcdResolver) ResolveNow(opt resolver.ResolveNowOption) {}
+
+func (r *etcdResolver) Close() {
+	r.cancel()
 }
 
-type Watcher struct {
-	c         *etcd.Client
-	target    string
-	WatchChan <-chan etcd.WatchResponse
-	ctx       context.Context
-	cancel    context.CancelFunc
-}
-
-func (w *Watcher) Next() ([]*resolver.Update, error) {
-	if w.WatchChan == nil {
-		resp, err := w.c.KV.Get(w.ctx, w.target, etcd.WithPrefix())
-		if err != nil {
-			return nil, err
+func (r *etcdResolver) watcher() {
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		default:
 		}
-		updates := make([]*resolver.Update, 0, len(resp.Kvs))
-		var ep registrator.Endpoint
-		for _, kv := range resp.Kvs {
-			if err := json.Unmarshal(kv.Value, &ep); err != nil {
-				continue
+		if r.wc == nil {
+			log.Println("reolvser:etcd get ", r.target)
+			resp, err := r.c.KV.Get(r.ctx, r.target, etcd.WithPrefix())
+			if err != nil {
+				log.Println("etcdResolver: failed to get address")
+				return
 			}
-			updates = append(updates, &resolver.Update{Op: resolver.Add, Name: ep.Name, Addr: ep.Addr})
+			var ep registrator.Endpoint
+			for _, kv := range resp.Kvs {
+				if err := json.Unmarshal(kv.Value, &ep); err != nil {
+					continue
+				}
+				r.addrs = append(r.addrs, resolver.Address{Addr: ep.Addr})
+			}
+
+			r.wc = r.c.Watch(r.ctx, r.target, etcd.WithPrevKV())
+		} else {
+			wc, ok := <-r.wc
+			if !ok {
+				log.Println("etcdResolver: etcd watch channel closed!")
+			}
+
+			var ep registrator.Endpoint
+			for _, e := range wc.Events {
+				switch e.Type {
+				case etcd.EventTypePut:
+					if err := json.Unmarshal(e.Kv.Value, &ep); err != nil {
+						continue
+					}
+					log.Println("reolvser:etcd watch add", &ep)
+					r.addrs = append(r.addrs, resolver.Address{Addr: ep.Addr})
+				case etcd.EventTypeDelete:
+					if err := json.Unmarshal(e.PrevKv.Value, &ep); err != nil {
+						continue
+					}
+					log.Println("reolvser:etcd watch del", &ep)
+					for i, v := range r.addrs {
+						if v.Addr == ep.Addr {
+							r.addrs = append(r.addrs[:i], r.addrs[i+1:]...)
+							break
+						}
+					}
+				}
+			}
 		}
-		w.WatchChan = w.c.Watch(w.ctx, w.target, etcd.WithPrevKV())
-		return updates, nil
+		log.Println("resolver:etcd addrs", r.addrs)
+		r.cc.NewAddress(r.addrs)
 	}
-
-	wc, ok := <-w.WatchChan
-	if !ok {
-		return nil, errors.New("resolver watch channel closed")
-	}
-
-	updates := make([]*resolver.Update, 0, len(wc.Events))
-	var ep registrator.Endpoint
-	for _, e := range wc.Events {
-		switch e.Type {
-		case etcd.EventTypePut:
-			if err := json.Unmarshal(e.Kv.Value, &ep); err != nil {
-				continue
-			}
-		case etcd.EventTypeDelete:
-			if err := json.Unmarshal(e.PrevKv.Value, &ep); err != nil {
-				continue
-			}
-		}
-		updates = append(updates, &resolver.Update{Op: resolver.Delete, Name: ep.Name, Addr: ep.Addr})
-	}
-	return updates, nil
-}
-
-func (w *Watcher) Close() {
-	w.cancel()
 }

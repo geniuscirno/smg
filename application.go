@@ -15,7 +15,6 @@ type Server interface {
 
 type applicationOptions struct {
 	registratorUrl   string
-	resolverUrl      string
 	registerEndpoint *registrator.Endpoint
 }
 
@@ -28,16 +27,9 @@ func WithRegistrator(s string, ep *registrator.Endpoint) ApplicationOption {
 	}
 }
 
-func WithResolver(s string) ApplicationOption {
-	return func(o *applicationOptions) {
-		o.resolverUrl = s
-	}
-}
-
 type Application struct {
 	opts           applicationOptions
 	appRegistrator *appRegistratorWarpper
-	appResolver    *appResolverWarpper
 }
 
 func NewApplication(opts ...ApplicationOption) (app *Application, err error) {
@@ -49,13 +41,6 @@ func NewApplication(opts ...ApplicationOption) (app *Application, err error) {
 
 	if app.opts.registratorUrl != "" {
 		app.appRegistrator, err = newAppRegistratorWarpper(app)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if app.opts.resolverUrl != "" {
-		app.appResolver, err = newAppResolverWarpper(app)
 		if err != nil {
 			return nil, err
 		}

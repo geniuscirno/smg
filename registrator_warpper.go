@@ -38,7 +38,7 @@ func newAppRegistratorWarpper(app *Application) (*appRegistratorWarpper, error) 
 		return nil, errors.New("WithRegistrator:register endpoint is nil")
 	}
 
-	warpper := &appRegistratorWarpper{}
+	warpper := &appRegistratorWarpper{app: app}
 
 	var err error
 	warpper.registrator, err = rb.Build(target)
