@@ -17,9 +17,10 @@ func Get(scheme string) (Builder, bool) {
 
 // Endpoint endpoint of a service.
 type Endpoint struct {
-	Id   string
-	Name string
+	// Id string
+	// Name string
 	Addr string
+	Meta interface{}
 }
 
 // Target represents a terget for registrator.
@@ -39,6 +40,6 @@ type Builder interface {
 
 //Registrator represents a registrator.
 type Registrator interface {
-	Register(s *Endpoint) error
-	Degister(s *Endpoint) error
+	Register(string, *Endpoint) error
+	Degister(string, *Endpoint) error
 }
