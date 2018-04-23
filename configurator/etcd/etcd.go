@@ -3,66 +3,11 @@ package etcd
 import (
 	"context"
 	"errors"
-	"log"
+	"path"
 
 	etcd "github.com/coreos/etcd/clientv3"
 	"github.com/geniuscirno/smg/configurator"
 )
-
-/*
-cfg := &Config{}
-
-`04service/cfg/account`
-
-type Config struct{
-	Mongo string	`json:"mongo-addr"`
-	Redis string 	`json:"redis-addr"`
-	LogLevel uint32 `json:"log-level"`
-	mutex sync.RWMutex
-}
-
-type (c *Config) Load(b []byte) error{
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	return json.Unmarshal(b, c)
-}
-
-func (c *Config) GetMongo() string{
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
-	return c.Mongo
-}
-
-func (c *Config) GetRedis() string{
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
-	return c.Redis
-}
-
-func (c *Config) GetLogLevel() uint32{
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
-	return c.LogLevel
-}
-
-type Server struct{
-	cfg *Config
-}
-
-func (s *Server) Load() error{
-	return s.cfg.Load()
-}
-
-func (s *Server) OnConfigChange() error{
-	log.SetLevel(s.cfg.LogLevel())
-}
-
-
-*/
 
 type builder struct{}
 
@@ -70,13 +15,13 @@ func init() {
 	configurator.Register(&builder{})
 }
 
-func (*builder) Build(target configurator.Target, cfg configurator.Configer) (configurator.Configurator, error) {
+func (*builder) Build(target configurator.Target) (configurator.Configurator, error) {
 	c, err := etcd.NewFromURL("http://" + target.Authority)
 	if err != nil {
 		return nil, err
 	}
 
-	return &etcdConfigurator{c: c, cfg: cfg, target: target.Endpoint}, nil
+	return &etcdConfigurator{c: c, target: target}, nil
 }
 
 func (*builder) Scheme() string {
@@ -85,41 +30,81 @@ func (*builder) Scheme() string {
 
 type etcdConfigurator struct {
 	c      *etcd.Client
-	target string
-	cfg    configurator.Configer
+	target configurator.Target
 }
 
-func (c *etcdConfigurator) Load() error {
-	resp, err := c.c.KV.Get(context.TODO(), c.target)
+func (c *etcdConfigurator) Load(file string, v configurator.Loader) error {
+	resp, err := c.c.KV.Get(context.TODO(), path.Join(c.target.Endpoint, "02app/cfg", file))
 	if err != nil {
 		return err
 	}
 
 	if resp.Count == 0 {
-		return errors.New("configurator:load not found")
+		return errors.New("etcdConfigurator:load not found")
 	}
-
-	return c.cfg.Load(resp.Kvs[0].Value)
+	return v.Load(resp.Kvs[0].Value)
 }
 
-func (c *etcdConfigurator) Watch() {
-	watcher := c.c.Watch(context.TODO(), c.target)
-	for {
-		wc, ok := <-watcher
-		if !ok {
-			log.Println("configurator:watch channel closed!")
-			return
+//func (c *etcdConfigurator) Put(file string, v interface{}) error {
+//	s, err := json.Marshal(v)
+//	if err != nil {
+//		return err
+//	}
+//	_, err = c.c.KV.Put(context.TODO(), path.Join(c.target.Endpoint, "02app/cfg", file), string(s))
+//	if err != nil {
+//		return err
+//	}
+//	return nil
+//}
+
+func (c *etcdConfigurator) Watch(file string) (configurator.Watcher, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Watcher{c: c.c, target: c.target, file: file, ctx: ctx, cancel: cancel}, nil
+}
+
+type Watcher struct {
+	c      *etcd.Client
+	target configurator.Target
+	file   string
+	ctx    context.Context
+	cancel context.CancelFunc
+	wch    etcd.WatchChan
+}
+
+func (w *Watcher) Next(v configurator.Loader) error {
+	if w.wch == nil {
+		resp, err := w.c.Get(w.ctx, path.Join(w.target.Endpoint, "02app/cfg", w.file))
+		if err != nil {
+			return err
 		}
 
-		for _, e := range wc.Events {
-			switch e.Type {
-			case etcd.EventTypePut:
-				if err := c.cfg.Load(e.Kv.Value); err != nil {
-					log.Println(err)
-					continue
-				}
-				c.cfg.OnConfigChange()
+		if resp.Count != 0 {
+			if err := v.Load(resp.Kvs[0].Value); err != nil {
+				return err
+			}
+		}
+		w.wch = w.c.Watch(w.ctx, path.Join(w.target.Endpoint, "02app/cfg", w.file))
+		return nil
+	}
+
+	wr, ok := <-w.wch
+	if !ok {
+		return errors.New("configurator watcher close")
+	}
+
+	var err error
+	for _, e := range wr.Events {
+		switch e.Type {
+		case etcd.EventTypePut:
+			err = v.Load(e.Kv.Value)
+			if err != nil {
+				continue
 			}
 		}
 	}
+	return err
+}
+
+func (w *Watcher) Close() {
+	w.cancel()
 }

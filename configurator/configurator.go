@@ -20,16 +20,21 @@ type Target struct {
 }
 
 type Builder interface {
-	Build(Target, Configer) (Configurator, error)
+	Build(Target) (Configurator, error)
 	Scheme() string
 }
 
-type Configer interface {
+type Loader interface {
 	Load([]byte) error
-	OnConfigChange() error
 }
 
 type Configurator interface {
-	Load() error
-	Watch()
+	Load(string, Loader) error
+	Watch(string) (Watcher, error)
+	//Put(path string, v interface{}) error
+}
+
+type Watcher interface {
+	Next(Loader) error
+	Close()
 }

@@ -3,8 +3,7 @@ package smg
 import (
 	"errors"
 	"fmt"
-	"log"
-	"strings"
+	"path"
 
 	"github.com/geniuscirno/smg/registrator"
 	_ "github.com/geniuscirno/smg/registrator/etcd"
@@ -13,14 +12,6 @@ import (
 type appRegistratorWarpper struct {
 	registrator registrator.Registrator
 	app         *Application
-}
-
-func split2(s, sep string) (string, string, bool) {
-	spl := strings.SplitN(s, sep, 2)
-	if len(spl) < 2 {
-		return "", "", false
-	}
-	return spl[0], spl[1], true
 }
 
 func parseRegistratorTarget(target string) (ret registrator.Target, err error) {
@@ -34,7 +25,7 @@ func parseRegistratorTarget(target string) (ret registrator.Target, err error) {
 }
 
 func newAppRegistratorWarpper(app *Application) (*appRegistratorWarpper, error) {
-	target, err := parseRegistratorTarget(app.opts.registratorUrl)
+	target, err := parseRegistratorTarget(app.cfg.RegistryUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -58,11 +49,9 @@ func newAppRegistratorWarpper(app *Application) (*appRegistratorWarpper, error) 
 }
 
 func (r *appRegistratorWarpper) Register() error {
-	log.Println("registrator:Register", r.app.opts.registerEndpoint)
-	return r.registrator.Register(r.app.opts.registerEndpoint)
+	return r.registrator.Register(path.Join("01registry", r.app.name), r.app.opts.registerEndpoint)
 }
 
 func (r *appRegistratorWarpper) Degister() error {
-	log.Println("registrator:Degister", r.app.opts.registerEndpoint)
-	return r.registrator.Degister(r.app.opts.registerEndpoint)
+	return r.registrator.Degister(path.Join("01registry", r.app.name), r.app.opts.registerEndpoint)
 }

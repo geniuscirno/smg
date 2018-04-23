@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/geniuscirno/smg/configurator"
+	_ "github.com/geniuscirno/smg/configurator/etcd"
 )
 
 type appConfiguratorWarpper struct {
@@ -23,7 +24,7 @@ func parseConfiguratorTarget(target string) (ret configurator.Target, err error)
 }
 
 func newAppConfiguratorWarpper(app *Application) (*appConfiguratorWarpper, error) {
-	target, err := parseConfiguratorTarget(app.opts.configuratorUrl)
+	target, err := parseConfiguratorTarget(app.configuratorUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -33,20 +34,12 @@ func newAppConfiguratorWarpper(app *Application) (*appConfiguratorWarpper, error
 		return nil, fmt.Errorf("invalid scheme: %s", target.Scheme)
 	}
 
-	if app.opts.config == nil {
-		return nil, errors.New("WithConfigurator: config is nil")
-	}
-
 	warpper := &appConfiguratorWarpper{app: app}
 
-	warpper.configurator, err = cb.Build(target, app.opts.config)
+	warpper.configurator, err = cb.Build(target)
 	if err != nil {
 		return nil, err
 	}
-	if err = warpper.configurator.Load(); err != nil {
-		return nil, err
-	}
-	go warpper.configurator.Watch()
 
 	return warpper, nil
 }
