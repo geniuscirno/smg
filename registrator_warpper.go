@@ -49,9 +49,9 @@ func newAppRegistratorWarpper(app *Application) (*appRegistratorWarpper, error) 
 }
 
 func (r *appRegistratorWarpper) Register() error {
-	return r.registrator.Register(path.Join("01registry", r.app.name), r.app.opts.registerEndpoint)
+	return r.registrator.Register(path.Join("registry", r.app.name, r.app.version), r.app.opts.registerEndpoint)
 }
 
 func (r *appRegistratorWarpper) Degister() error {
-	return r.registrator.Degister(path.Join("01registry", r.app.name), r.app.opts.registerEndpoint)
+	return r.registrator.Degister(path.Join("registry", r.app.name, r.app.version), r.app.opts.registerEndpoint)
 }

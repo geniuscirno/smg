@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"syscall"
 
 	"github.com/sirupsen/logrus"
@@ -30,14 +31,45 @@ type Server interface {
 }
 
 type applicationOptions struct {
-	registerEndpoint *registrator.Endpoint
+	registerEndpoint  *registrator.Endpoint
+	includeCfgPattern []string
+	ignoreCfgPattern  []string
+	prefix            string
+	cfgPath           string
 }
 
 type ApplicationOption func(*applicationOptions)
 
-func WithRegistrator(ep *registrator.Endpoint) ApplicationOption {
+func WithRegistrator(advertiseAddr string, meta interface{}) ApplicationOption {
 	return func(o *applicationOptions) {
-		o.registerEndpoint = ep
+		o.registerEndpoint = &registrator.Endpoint{
+			Addr: advertiseAddr,
+			Meta: meta,
+		}
+	}
+}
+
+func WithIncludeCfgFile(pattern []string) ApplicationOption {
+	return func(o *applicationOptions) {
+		o.includeCfgPattern = pattern
+	}
+}
+
+func WithIgnoreCfgFile(pattern []string) ApplicationOption {
+	return func(o *applicationOptions) {
+		o.ignoreCfgPattern = pattern
+	}
+}
+
+func WithPrefix(prefix string) ApplicationOption {
+	return func(o *applicationOptions) {
+		o.prefix = prefix
+	}
+}
+
+func WithCfgPath(cfgPath string) ApplicationOption {
+	return func(o *applicationOptions) {
+		o.cfgPath = cfgPath
 	}
 }
 
@@ -63,15 +95,37 @@ type Application struct {
 	opts            applicationOptions
 	appRegistrator  *appRegistratorWarpper
 	appConfigurator *appConfiguratorWarpper
-	configuratorUrl string
+	parsedTarget    configurator.Target
 	cfg             *Config
 	name            string
+	version         string
 }
 
-func NewApplication(name string, url string, opts ...ApplicationOption) (app *Application, err error) {
-	app = &Application{name: name, cfg: &Config{}}
+func NewApplication(name string, version string, url string, opts ...ApplicationOption) (app *Application, err error) {
+	app = &Application{name: name, cfg: &Config{}, version: version}
 
-	app.configuratorUrl = url
+	for _, opt := range opts {
+		opt(&app.opts)
+	}
+
+	if app.opts.prefix == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		app.opts.prefix = wd
+	}
+
+	if len(app.opts.includeCfgPattern) == 0 {
+		app.opts.includeCfgPattern = []string{"*.*", "*"}
+	}
+
+	parsedTarget, err := parseConfiguratorTarget(url)
+	if err != nil {
+		return nil, err
+	}
+
+	app.parsedTarget = parsedTarget
 	app.appConfigurator, err = newAppConfiguratorWarpper(app)
 	if err != nil {
 		return nil, err
@@ -83,10 +137,6 @@ func NewApplication(name string, url string, opts ...ApplicationOption) (app *Ap
 
 	if app.Environment() == EEnvironmentTypeInvaild {
 		return nil, errors.New("invalid environment type")
-	}
-
-	for _, opt := range opts {
-		opt(&app.opts)
 	}
 
 	if app.opts.registerEndpoint != nil {
@@ -132,24 +182,31 @@ func (app *Application) Run(server Server) error {
 	return nil
 }
 
+func (app *Application) GlobalCfgRoot() string {
+	return filepath.ToSlash(path.Join(app.parsedTarget.Endpoint, "cfg"))
+}
+
+func (app *Application) CfgRoot() string {
+	if app.opts.cfgPath == "" {
+		return filepath.ToSlash(path.Join(app.GlobalCfgRoot(), app.name, app.version))
+	}
+	return filepath.ToSlash(path.Join(app.GlobalCfgRoot(), app.opts.cfgPath, app.version))
+}
+
 func (app *Application) loadApplicationCfg() error {
-	return app.appConfigurator.configurator.Load("application/default", app.cfg)
+	return app.appConfigurator.configurator.Load(path.Join(app.GlobalCfgRoot(), "application", "default"), app.cfg)
 }
 
 func (app *Application) Load(file string, v configurator.Loader) error {
-	return app.appConfigurator.configurator.Load(app.name+"/"+file, v)
+	return app.appConfigurator.configurator.Load(path.Join(app.CfgRoot(), file), v)
 }
 
-//func (app *Application) Put(file string, v interface{}) error {
-//	return app.appConfigurator.configurator.Put(app.name+"/"+file, v)
-//}
-
 func (app *Application) Watch(file string) (configurator.Watcher, error) {
-	return app.appConfigurator.configurator.Watch(app.name + "/" + file)
+	return app.appConfigurator.configurator.Watch(path.Join(app.CfgRoot(), file))
 }
 
 func (app *Application) ApplicationUrl(name string) string {
-	return app.cfg.RegistryUrl + "/" + path.Join("01registry", name)
+	return app.cfg.RegistryUrl + "/" + path.Join("registry", name)
 }
 
 func (app *Application) Cfg() *Config {
