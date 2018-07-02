@@ -17,10 +17,10 @@ func Get(scheme string) (Builder, bool) {
 
 // Endpoint endpoint of a service.
 type Endpoint struct {
-	// Id string
-	// Name string
-	Addr string
-	Meta interface{}
+	Name    string      `json:"name"`
+	Addr    string      `json:"addr"`
+	Version string      `json:"version"`
+	Meta    interface{} `json:"meta"`
 }
 
 // Target represents a terget for registrator.

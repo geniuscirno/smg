@@ -36,16 +36,18 @@ type applicationOptions struct {
 	ignoreCfgPattern  []string
 	prefix            string
 	cfgPath           string
+	nameSpace         string
 }
 
 type ApplicationOption func(*applicationOptions)
 
-func WithRegistrator(advertiseAddr string, meta interface{}) ApplicationOption {
+func WithRegistrator(nameSpace string, advertiseAddr string, meta interface{}) ApplicationOption {
 	return func(o *applicationOptions) {
 		o.registerEndpoint = &registrator.Endpoint{
 			Addr: advertiseAddr,
 			Meta: meta,
 		}
+		o.nameSpace = nameSpace
 	}
 }
 
@@ -91,7 +93,16 @@ func (c *Config) String() string {
 	return string(b)
 }
 
-type Application struct {
+type Application interface {
+	Environment() EnvironmentType
+	Run(Server) error
+	Load(string, configurator.Loader) error
+	Watch(string) (configurator.Watcher, error)
+	ApplicationUrl(string, string) string
+	Cfg() *Config
+}
+
+type application struct {
 	opts            applicationOptions
 	appRegistrator  *appRegistratorWarpper
 	appConfigurator *appConfiguratorWarpper
@@ -101,8 +112,8 @@ type Application struct {
 	version         string
 }
 
-func NewApplication(name string, version string, url string, opts ...ApplicationOption) (app *Application, err error) {
-	app = &Application{name: name, cfg: &Config{}, version: version}
+func NewApplication(name string, version string, url string, opts ...ApplicationOption) (app *application, err error) {
+	app = &application{name: name, cfg: &Config{}, version: version}
 
 	for _, opt := range opts {
 		opt(&app.opts)
@@ -149,7 +160,7 @@ func NewApplication(name string, version string, url string, opts ...Application
 	return app, nil
 }
 
-func (app *Application) Environment() EnvironmentType {
+func (app *application) Environment() EnvironmentType {
 	switch app.cfg.Environment {
 	case "public":
 		return EEnvironmentTypePublic
@@ -162,7 +173,7 @@ func (app *Application) Environment() EnvironmentType {
 	}
 }
 
-func (app *Application) Run(server Server) error {
+func (app *application) Run(server Server) error {
 	if app.appRegistrator != nil {
 		if err := app.appRegistrator.Register(); err != nil {
 			return err
@@ -182,33 +193,33 @@ func (app *Application) Run(server Server) error {
 	return nil
 }
 
-func (app *Application) GlobalCfgRoot() string {
+func (app *application) GlobalCfgRoot() string {
 	return filepath.ToSlash(path.Join(app.parsedTarget.Endpoint, "cfg"))
 }
 
-func (app *Application) CfgRoot() string {
+func (app *application) CfgRoot() string {
 	if app.opts.cfgPath == "" {
 		return filepath.ToSlash(path.Join(app.GlobalCfgRoot(), app.name, app.version))
 	}
 	return filepath.ToSlash(path.Join(app.GlobalCfgRoot(), app.opts.cfgPath, app.version))
 }
 
-func (app *Application) loadApplicationCfg() error {
+func (app *application) loadApplicationCfg() error {
 	return app.appConfigurator.configurator.Load(path.Join(app.GlobalCfgRoot(), "application", "default"), app.cfg)
 }
 
-func (app *Application) Load(file string, v configurator.Loader) error {
+func (app *application) Load(file string, v configurator.Loader) error {
 	return app.appConfigurator.configurator.Load(path.Join(app.CfgRoot(), file), v)
 }
 
-func (app *Application) Watch(file string) (configurator.Watcher, error) {
+func (app *application) Watch(file string) (configurator.Watcher, error) {
 	return app.appConfigurator.configurator.Watch(path.Join(app.CfgRoot(), file))
 }
 
-func (app *Application) ApplicationUrl(name string) string {
-	return app.cfg.RegistryUrl + "/" + path.Join("registry", name)
+func (app *application) ApplicationUrl(nameSpace string, name string) string {
+	return app.cfg.RegistryUrl + "/" + path.Join("registry", nameSpace, name)
 }
 
-func (app *Application) Cfg() *Config {
+func (app *application) Cfg() *Config {
 	return app.cfg
 }

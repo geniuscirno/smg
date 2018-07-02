@@ -16,7 +16,7 @@ import (
 
 type appConfiguratorWarpper struct {
 	configurator configurator.Configurator
-	app          *Application
+	app          *application
 	localCfgRoot string
 }
 
@@ -30,7 +30,7 @@ func parseConfiguratorTarget(target string) (ret configurator.Target, err error)
 	return ret, nil
 }
 
-func newAppConfiguratorWarpper(app *Application) (*appConfiguratorWarpper, error) {
+func newAppConfiguratorWarpper(app *application) (*appConfiguratorWarpper, error) {
 	var err error
 
 	warpper := &appConfiguratorWarpper{app: app, localCfgRoot: path.Join(app.opts.prefix, "cfg")}
